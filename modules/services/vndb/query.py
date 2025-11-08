@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List
 
 if TYPE_CHECKING:
     from ..models.user import User
+
+from aiohttp import ClientResponseError
 
 from modules.core.resources import Resources
 from ..models.query import Query, user_id
@@ -13,6 +15,7 @@ from ..models.entry import ListEntry
 from ..anilist.enums import Status
 from .entry import VnEntry
 from .profile import VndbProfile
+from modules.services.vndb_ratelimit import RateLimitError, SyncBudgetError, parse_retry_after
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +89,29 @@ class VndbQuery(Query):
             return {}
 
         results: Dict[user_id, FetchData] = {}
-        for user in users:
+        for index, user in enumerate(users):
             entries: List[ListEntry] = []
             try:
                 entries = await self._fetch_user_entries(user.service_id)
+            except SyncBudgetError as exc:
+                logger.info(
+                    "VNDB sync budget reached; pausing sync for %.2f seconds",
+                    exc.retry_after,
+                )
+                results[user._id] = self._sync_budget_response(user)
+                # Any remaining users in this batch should get the same message without additional requests
+                for leftover_user in users[index + 1 :]:
+                    results[leftover_user._id] = self._sync_budget_response(leftover_user)
+                break
+            except RateLimitError as exc:
+                logger.warning(
+                    "VNDB API hard rate limit reached; retry after %.2f seconds",
+                    exc.retry_after,
+                )
+                results[user._id] = self._hard_limit_response(user, exc.retry_after)
+                for leftover_user in users[index + 1 :]:
+                    results[leftover_user._id] = self._hard_limit_response(leftover_user, exc.retry_after)
+                break
             except Exception as exc:
                 logger.exception('VNDB fetch failed for user %s', user.service_id)
                 results[user._id] = FetchData(
@@ -117,8 +139,16 @@ class VndbQuery(Query):
                 'results': 100,
             }
 
-            async with Resources.syncer_session.post(f'{API_BASE}/ulist', json=payload, raise_for_status=True) as resp:
-                data = await resp.json()
+            await Resources.vndb_rate_limiter.consume(for_sync=True)
+            try:
+                async with Resources.syncer_session.post(f'{API_BASE}/ulist', json=payload, raise_for_status=True) as resp:
+                    data = await resp.json()
+            except ClientResponseError as exc:
+                if exc.status == 429:
+                    retry_after = parse_retry_after(exc.headers.get('Retry-After'))
+                    retry_after = await Resources.vndb_rate_limiter.mark_limited(retry_after)
+                    raise RateLimitError(retry_after) from exc
+                raise
 
             for item in data.get('results', []):
                 entry = self._map_entry(item)
@@ -171,4 +201,24 @@ class VndbQuery(Query):
             if 'wish' in label_name or 'plan' in label_name:
                 return Status.PLANNING
         return Status.UNKNOWN
+
+    def _sync_budget_response(self, user: 'User') -> FetchData:
+        message = (
+            "VNDB sync temporarily paused to preserve API quota. "
+            "Sync will resume automatically once the cooldown ends."
+        )
+        return FetchData(
+            lists={'vn': QueryResult(status=ResultStatus.ERROR, data=message)},
+            profile=QueryResult(status=ResultStatus.OK, data=user.profile),
+        )
+
+    def _hard_limit_response(self, user: 'User', retry_after: float) -> FetchData:
+        message = (
+            "VNDB sync hit the API rate limit. "
+            f"Will retry after {max(1, int(retry_after))} seconds."
+        )
+        return FetchData(
+            lists={'vn': QueryResult(status=ResultStatus.ERROR, data=message)},
+            profile=QueryResult(status=ResultStatus.OK, data=user.profile),
+        )
 

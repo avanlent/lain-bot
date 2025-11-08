@@ -1,7 +1,10 @@
 import re
 from typing import Dict
 
+from aiohttp import ClientResponseError
+
 from modules.core.resources import Resources
+from modules.services.vndb_ratelimit import RateLimitError, parse_retry_after
 
 API_BASE = 'https://api.vndb.org/kana'
 
@@ -20,6 +23,10 @@ VN_FIELDS = ', '.join([
 	'image.url',
 	'image.sexual',
 	'image.violence',
+	'screenshots.url',
+	'screenshots.thumbnail',
+	'screenshots.sexual',
+	'screenshots.violence',
 ])
 
 class VndbSearch:
@@ -33,9 +40,16 @@ class VndbSearch:
 			'sort': 'searchrank',
 			'results': limit,
 		}
+		await Resources.vndb_rate_limiter.consume(for_sync=False)
 		try:
 			async with Resources.session.post(f'{API_BASE}/vn', json=payload, raise_for_status=True) as resp:
 				data = await resp.json()
+		except ClientResponseError as exc:
+			if exc.status == 429:
+				retry_after = parse_retry_after(exc.headers.get('Retry-After'))
+				retry_after = await Resources.vndb_rate_limiter.mark_limited(retry_after)
+				raise RateLimitError(retry_after) from exc
+			raise
 		except Exception:
 			async with Resources.session.post(f'{API_BASE}/vn', json=payload) as resp:
 				text = await resp.text()
@@ -53,10 +67,16 @@ class VndbSearch:
 		quote = srch.group(2)
 		vid = srch.group(1)
 
-		async with Resources.session.post(f'{API_BASE}/vn', json={'filters': ['id', '=', vid], 'fields': 'title, image.url'}) as resp:
-			if resp.status != 200:
-				raise Exception("Bad fetch")
-			data = await resp.json()
+		await Resources.vndb_rate_limiter.consume(for_sync=False)
+		try:
+			async with Resources.session.post(f'{API_BASE}/vn', json={'filters': ['id', '=', vid], 'fields': 'title, image.url'}, raise_for_status=True) as resp:
+				data = await resp.json()
+		except ClientResponseError as exc:
+			if exc.status == 429:
+				retry_after = parse_retry_after(exc.headers.get('Retry-After'))
+				retry_after = await Resources.vndb_rate_limiter.mark_limited(retry_after)
+				raise RateLimitError(retry_after) from exc
+			raise
 		
 		item = data['results'][0]
 
