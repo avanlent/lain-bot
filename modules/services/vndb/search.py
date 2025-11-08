@@ -1,4 +1,4 @@
-import re
+import re, html
 from typing import Dict
 
 from aiohttp import ClientResponseError
@@ -57,19 +57,14 @@ class VndbSearch:
 		return data
 
 	async def quote(self):
-		async with Resources.session.get('https://vndb.org/', headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36'}) as resp:
-			if resp.status != 200:
-				raise Exception("Bad fetch")
-			html = await resp.read()
-			html = html.decode('utf-8')
-		
-		srch = re.search(r'"<a href="/(v\d+)">(.*)</a>&quot;', html)
-		quote = srch.group(2)
-		vid = srch.group(1)
+		payload = {
+			"fields": "quote,vn{id,title,image.url},character{id,name}",
+			"filters": ["random", "=", 1],
+		}
 
 		await Resources.vndb_rate_limiter.consume(for_sync=False)
 		try:
-			async with Resources.session.post(f'{API_BASE}/vn', json={'filters': ['id', '=', vid], 'fields': 'title, image.url'}, raise_for_status=True) as resp:
+			async with Resources.session.post(f'{API_BASE}/quote', json=payload, raise_for_status=True) as resp:
 				data = await resp.json()
 		except ClientResponseError as exc:
 			if exc.status == 429:
@@ -77,8 +72,19 @@ class VndbSearch:
 				retry_after = await Resources.vndb_rate_limiter.mark_limited(retry_after)
 				raise RateLimitError(retry_after) from exc
 			raise
-		
-		item = data['results'][0]
 
-		return {'quote': quote, 'title': item['title'], 'cover': item['image']['url'], 'id': item['id']}
+		results = data.get('results') or []
+		if not results:
+			raise RuntimeError("VNDB quote request returned no results")
+
+		item = results[0]
+		vn_data = item.get('vn') or {}
+		image_data = vn_data.get('image') or {}
+		return {
+			'quote': item.get('quote', ''),
+			'title': vn_data.get('title', 'Unknown'),
+			'cover': image_data.get('url') or '',
+			'id': vn_data.get('id'),
+			'character': item.get('character'),
+		}
 

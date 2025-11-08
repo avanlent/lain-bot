@@ -570,12 +570,17 @@ class Weeb(commands.Cog, name="Weeb"):
 	@vn_group.command()
 	async def quote(self, interaction):
 		"""display a random visual novel quote"""
-		q = VndbSearch()
-		quote = await q.quote()
-
 		try:
+			q = VndbSearch()
 			quote = await q.quote()
-		except:
+		except RateLimitError as exc:
+			wait_seconds = max(1, int(exc.retry_after)) if exc.retry_after else 300
+			return await interaction.response.send_message(
+				f"VNDB quote API is rate limited. Please try again in ~{wait_seconds} seconds.",
+				ephemeral=True,
+			)
+		except Exception:
+			logger.exception('Unable to retrieve VNDB quote')
 			return await interaction.response.send_message('Unable to retrieve quote')
 
 		embed = discord.Embed(
@@ -584,6 +589,11 @@ class Weeb(commands.Cog, name="Weeb"):
 				)
 
 		embed.set_author(name=quote['title'], url='https://vndb.org/' + str(quote['id']), icon_url=quote['cover'])
+		character = quote.get('character')
+		if character:
+			char_name = character.get('name')
+			if char_name:
+				embed.set_footer(text=f"Character: {char_name}")
 
 		await interaction.response.send_message(embed=embed)
 
