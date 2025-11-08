@@ -86,7 +86,10 @@ class VndbQuery(Query):
 
     async def fetch(self, users: List['User'] = [], tries: int = 3) -> Dict[user_id, FetchData]:
         if not users:
+            self.deferred_users = []
             return {}
+
+        self.deferred_users: List['User'] = []
 
         results: Dict[user_id, FetchData] = {}
         for index, user in enumerate(users):
@@ -98,19 +101,14 @@ class VndbQuery(Query):
                     "VNDB sync budget reached; pausing sync for %.2f seconds",
                     exc.retry_after,
                 )
-                results[user._id] = self._sync_budget_response(user)
-                # Any remaining users in this batch should get the same message without additional requests
-                for leftover_user in users[index + 1 :]:
-                    results[leftover_user._id] = self._sync_budget_response(leftover_user)
+                self.deferred_users = users[index:]
                 break
             except RateLimitError as exc:
                 logger.warning(
                     "VNDB API hard rate limit reached; retry after %.2f seconds",
                     exc.retry_after,
                 )
-                results[user._id] = self._hard_limit_response(user, exc.retry_after)
-                for leftover_user in users[index + 1 :]:
-                    results[leftover_user._id] = self._hard_limit_response(leftover_user, exc.retry_after)
+                self.deferred_users = users[index:]
                 break
             except Exception as exc:
                 logger.exception('VNDB fetch failed for user %s', user.service_id)

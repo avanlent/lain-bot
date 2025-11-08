@@ -508,6 +508,10 @@ class Weeb(commands.Cog, name="Weeb"):
 				selected_is_nsfw = bool(selected_image_url)
 				selected_ref = f"{vn_id}_cover"
 
+			extra = None
+			if interaction.guild:
+				extra = await embedVnScores(interaction.guild, vn_id, 9, embed)
+
 			message_sent = False
 			if selected_image_url and not selected_is_nsfw:
 				embed.set_image(url=selected_image_url)
@@ -529,10 +533,6 @@ class Weeb(commands.Cog, name="Weeb"):
 				embed.set_image(url=default_cover)
 				await interaction.response.send_message(embed=embed)
 				message_sent = True
-
-			extra = None
-			if interaction.guild:
-				extra = await embedVnScores(interaction.guild, vn_id, 9, embed)
 
 			if extra:
 				if not message_sent:

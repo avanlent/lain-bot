@@ -68,5 +68,6 @@ class Service:
         for service in Service.active():
             Resources.removal_buffers[service] = set()
             Resources.status_buffers[service] = {}
+            Resources.sync_resume_buffers[service] = []
             syncer = Syncer(bot, service, service.Query(), service.time_between_queries)
             bot.loop.create_task(syncer.loop())

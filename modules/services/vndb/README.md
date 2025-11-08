@@ -12,6 +12,7 @@ This document summarizes the recent improvements made to the VNDB integration in
 2. **Syncer Behavior**
    - VNDB sync fetches (`modules/services/vndb/query.py`) use the limiter and emit user-facing errors when the reserved quota is exhausted.
    - Fetch loops no longer hammer the API during high-load periods and instead pause until the next window resets.
+    - When the quota runs out mid-batch, the syncer now remembers the remaining users and finishes them first in the next window.
 
 3. **User Command Enhancements**
    - `/vn get` now:

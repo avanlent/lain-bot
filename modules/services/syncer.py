@@ -34,24 +34,34 @@ class Syncer:
                 Resources.removal_buffers[self.service] = set()
                 Resources.status_buffers[self.service] = {}
                 cursor = Resources.user_col.find({'status': { '$not': { '$eq': UserStatus.INACTIVE } }, 'service': self.service})
-                try:
-                    users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
-                except asyncio.CancelledError:
-                    raise
-                except:
-                    users = []
-                    logger.exception(f"initial batch fail for {self.service}")
+
+                resume_users = Resources.sync_resume_buffers.get(self.service, [])
+                if resume_users:
+                    users = resume_users
+                    Resources.sync_resume_buffers[self.service] = []
+                else:
+                    try:
+                        raw_users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
+                    except asyncio.CancelledError:
+                        raise
+                    except:
+                        raw_users = []
+                        logger.exception(f"initial batch fail for {self.service}")
+                    users = [User(**user) for user in raw_users]
 
                 while users:
-                    users = [User(**user) for user in users] # format document to User
                     names = [u.profile.name for u in users]
                     
                     # print(f"{self.service}::{names}")
                     fetch_start = time.time()
                     fetched_data = await self.query.fetch(users) # query new data for users
+                    deferred_users = getattr(self.query, 'deferred_users', [])
+                    deferred_ids = {u._id for u in deferred_users} if deferred_users else set()
 
                     # handle each user
                     for user in users:
+                        if deferred_ids and user._id in deferred_ids:
+                            continue
                         user_data = fetched_data.get(user._id)
 
                         if not user_data: # query didn't populate this user
@@ -90,17 +100,23 @@ class Syncer:
                             )
                 
                     users_end = time.time()
+                    sleep_corrected = max(0, self.sleep_time - (users_end-fetch_start))
+                    await asyncio.sleep(sleep_corrected)
+
+                    if deferred_users:
+                        Resources.sync_resume_buffers[self.service] = deferred_users
+                        users = []
+                        continue
+
                     # ready new batch from db
                     try:
-                        users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
+                        raw_users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
                     except asyncio.CancelledError:
                         raise
                     except:
                         logger.exception(f'new batch fail for {self.service}')
-                        users = []
-                    finally:
-                        sleep_corrected = max(0, self.sleep_time - (users_end-fetch_start))
-                        await asyncio.sleep(sleep_corrected)
+                        raw_users = []
+                    users = [User(**user) for user in raw_users]
             
                 # done with all the batches, start new round of batches
                 await cursor.close()
