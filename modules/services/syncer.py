@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from io import BytesIO
     
 import asyncio, discord, datetime, logging, time
+from io import BytesIO
 
 from . import Service
 from .models.user import User, UserStatus
@@ -230,16 +231,15 @@ class Syncer:
         for lst in msgs:
             embed.add_field(name=f"Updated their {lst} list", value=self._limit_msgs(msgs[lst]), inline=False)
 
-        if not imgs:
-            return await channel.send(embed=embed)
+        attachments: List[discord.File] = []
+        spoiler_lines: List[str] = []
 
         safe_imgs = [img for img in imgs if not img.nsfw]
+        nsfw_imgs = [img for img in imgs if img.nsfw]
 
         if len(safe_imgs) == 1:
             embed.set_image(url=safe_imgs[0].wide)
-            return await channel.send(embed=embed)
-
-        if len(safe_imgs) > 1:
+        elif len(safe_imgs) > 1:
             combine_key = tuple(image.narrow for image in safe_imgs[:6])
             fn = f"{hash(combine_key)}.jpg"
             fp = img_stash.get(fn)
@@ -248,12 +248,32 @@ class Syncer:
                 img_stash[fn] = fp
             else:
                 fp.seek(0)
+            fp.seek(0)
+            attachments.append(discord.File(fp, filename=fn))
             embed.set_image(url=f"attachment://{fn}")
-            file = discord.File(fp, filename=fn)
-            return await channel.send(file=file, embed=embed)
 
-        # no safe images
-        return await channel.send(embed=embed)
+        if not safe_imgs and nsfw_imgs:
+            embed.set_image(url=nsfw_imgs[0].wide)
+
+        for image in nsfw_imgs[:6]:
+            spoiler_lines.append(f"|| {image.wide} ||")
+
+        spoiler_content = "\n".join(spoiler_lines) if spoiler_lines else None
+
+        if spoiler_content:
+            msg = await channel.send(content=spoiler_content)
+            edit_kwargs = {"content": spoiler_content, "embed": embed}
+            if attachments:
+                edit_kwargs["files"] = attachments
+            return await msg.edit(**edit_kwargs)
+
+        send_kwargs = {"embed": embed}
+        if attachments:
+            if len(attachments) == 1:
+                send_kwargs["file"] = attachments[0]
+            else:
+                send_kwargs["files"] = attachments
+        return await channel.send(**send_kwargs)
 
     def _limit_msgs(self, msgs, limit=6):
         num_changes = len(msgs)

@@ -8,6 +8,14 @@ from ..models.entry import ListEntry, Specs, field
 from ..models.data import Image
 
 
+def _format_title(self: VnEntry) -> str:
+    title = self['title'] or 'Unknown VN'
+    link = self._link()
+    if link:
+        return f"[{title}]({link})"
+    return title
+
+
 def _status_consumer(self: VnEntry, old: str, new: str) -> Optional[Change]:
     if old == new:
         return None
@@ -18,7 +26,7 @@ def _status_consumer(self: VnEntry, old: str, new: str) -> Optional[Change]:
         ChangeKind.STATUS,
         old_label,
         new_label,
-        f"status of {self['title']} set to {new_label}",
+        f"status of {_format_title(self)} set to {new_label}",
     )
 
 
@@ -26,9 +34,10 @@ def _vote_consumer(self: VnEntry, old: Optional[int], new: Optional[int]) -> Opt
     if old == new:
         return None
 
+    target = _format_title(self)
     if not old:
-        return Change(ChangeKind.SCORE, old, new, f"score for {self['title']} set to {new}")
-    return Change(ChangeKind.SCORE, old, new, f"score for {self['title']} changed: {old} ➔ {new}")
+        return Change(ChangeKind.SCORE, old, new, f"score for {target} set to {new}")
+    return Change(ChangeKind.SCORE, old, new, f"score for {target} changed: {old} ➔ {new}")
 
 
 class VnEntry(ListEntry):
@@ -52,4 +61,12 @@ class VnEntry(ListEntry):
         if not url:
             return []
         return [Image(narrow=url, wide=url, nsfw=bool(self['image_nsfw']))]
+
+    def _link(self) -> Optional[str]:
+        vid = str(self['id']) if self['id'] is not None else ''
+        if not vid:
+            return None
+        if vid.startswith('v'):
+            return f"https://vndb.org/{vid}"
+        return f"https://vndb.org/v{vid}"
 

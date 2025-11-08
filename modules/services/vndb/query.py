@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 API_BASE = 'https://api.vndb.org/kana'
 
-VN_FIELDS = 'id, vote, lastmod, labels.id, labels.label, vn.title, vn.image.url'
+VN_FIELDS = 'id, vote, lastmod, labels.id, labels.label, vn.title, vn.image.url, vn.image.sexual, vn.image.violence'
 
 LABEL_STATUS_MAP = {
     1: Status.CURRENT,    # Playing
