@@ -59,7 +59,7 @@ class Bot(commands.Bot):
 
         self.help_command = CustomHelpCommand()
 
-        guilds = [discord.Object(id=254864526069989377)] # 259896980308754432
+        guilds = [discord.Object(id=1436613409402523688)] #TODO
         for guild in guilds:
             # self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)

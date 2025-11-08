@@ -230,23 +230,30 @@ class Syncer:
         for lst in msgs:
             embed.add_field(name=f"Updated their {lst} list", value=self._limit_msgs(msgs[lst]), inline=False)
 
-        if len(imgs) == 1:
-            embed.set_image(url=imgs[0].wide)
+        if not imgs:
             return await channel.send(embed=embed)
-        elif len(imgs) > 1:
-            imgs = tuple([i.narrow for i in imgs][:6])
-            fn = f"{hash(imgs)}.jpg"
+
+        safe_imgs = [img for img in imgs if not img.nsfw]
+
+        if len(safe_imgs) == 1:
+            embed.set_image(url=safe_imgs[0].wide)
+            return await channel.send(embed=embed)
+
+        if len(safe_imgs) > 1:
+            combine_key = tuple(image.narrow for image in safe_imgs[:6])
+            fn = f"{hash(combine_key)}.jpg"
             fp = img_stash.get(fn)
             if not fp:
-                fp = await Resources.img_gen.combineUrl(Resources.syncer_session, self.bot.loop, imgs)
+                fp = await Resources.img_gen.combineUrl(Resources.syncer_session, self.bot.loop, combine_key)
                 img_stash[fn] = fp
             else:
                 fp.seek(0)
             embed.set_image(url=f"attachment://{fn}")
-            f = discord.File(fp, filename=fn)
-            return await channel.send(file=f, embed=embed)
-        else:
-            return await channel.send(embed=embed)
+            file = discord.File(fp, filename=fn)
+            return await channel.send(file=file, embed=embed)
+
+        # no safe images
+        return await channel.send(embed=embed)
 
     def _limit_msgs(self, msgs, limit=6):
         num_changes = len(msgs)
@@ -277,3 +284,4 @@ class Syncer:
 
         change_msgs = f"{change_msgs}{extra.format(cnt=cnt)}"
         return change_msgs
+

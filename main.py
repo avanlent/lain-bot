@@ -15,6 +15,9 @@ stream_handler.setLevel(logging.ERROR)
 logging.basicConfig(level=logging.DEBUG, handlers=[
 	stream_handler, file_handler])
 
+# Quiet overly verbose pymongo command logging (causes recursion errors when enums appear)
+logging.getLogger('pymongo').setLevel(logging.WARNING)
+
 # Log unhandled exceptions
 def log_exception(exc_type, exc_value, tb):
 	if issubclass(exc_type, KeyboardInterrupt):

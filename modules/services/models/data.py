@@ -60,6 +60,7 @@ class FetchData:
 class Image:
     narrow: str = ''
     wide: str = ''
+    nsfw: bool = False
 
 @dataclass
 class UserSearch:

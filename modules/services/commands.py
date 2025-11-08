@@ -1,12 +1,15 @@
 from modules.services.models.data import EntryAttributes, ResultStatus
-import discord, asyncio
+import discord, asyncio, logging
 from discord.ext import commands
 from discord import app_commands
 from modules.core.resources import Resources
 from modules.services import Service, Services
 from modules.services.models.user import UserStatus, User
+from modules.services.vndb.profile import VndbProfile
 
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 class ServiceCommands(commands.Cog):
     def __init__(self, bot):
@@ -227,6 +230,43 @@ class ServiceCommands(commands.Cog):
             title = name,
             url = user.link,
         )
+
+        # VNDB profiles don't supply an avatar; reuse one from another linked service if available.
+        if service == Services.vndb.value:
+            profile = None
+            try:
+                profile = user.data.profile.data
+            except Exception:
+                profile = None
+
+            if isinstance(profile, VndbProfile) and (not profile.avatar or profile.avatar == VndbProfile.DEFAULT_AVATAR):
+                fallback_avatar = None
+                cursor = Resources.user_col.find(
+                    {
+                        'discord_id': str(interaction.user.id),
+                        'service': {'$ne': Services.vndb.value},
+                        'profile.avatar': {'$exists': True, '$ne': None},
+                    },
+                    {'profile.avatar': 1},
+                )
+                async for doc in cursor:
+                    avatar = doc.get('profile', {}).get('avatar')
+                    if avatar:
+                        fallback_avatar = avatar
+                        logging.getLogger(__name__).info(
+                            "Using fallback avatar from service '%s' for VNDB link",
+                            doc.get('service'),
+                        )
+                        break
+                if fallback_avatar:
+                    profile.avatar = fallback_avatar
+                    user.image = fallback_avatar
+                else:
+                    logging.getLogger(__name__).info(
+                        "No fallback avatar found for VNDB link by user %s",
+                        interaction.user.id,
+                    )
+
         embed.set_thumbnail(url=user.image)
 
         msg = await interaction.followup.send(content='Is this you?', embed=embed, wait=True)
