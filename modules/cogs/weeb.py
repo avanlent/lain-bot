@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from modules.queries.anime.safebooru import Safebooru
 from modules.queries.anime.doujin import Doujin
 from modules.queries.anime.anilist2 import Anilist2
-from modules.queries.anime.vndb import Vndb
+from modules.services.vndb.search import VndbSearch
 
 from modules.core.resources import Resources
 
@@ -340,71 +340,56 @@ class Weeb(commands.Cog, name="Weeb"):
 
 		try:
 			# grab info from database
-			vn = Vndb()
-			r = vn.vn(name)
-			r = r['items'][0]
+			vn = VndbSearch()
+			data = await vn.vn(name, limit=5)
+
+			items = data.get('results') or data.get('items') or []
+			if not items:
+				await interaction.response.send_message('VN not found (title usually has to be exact)')
+				return
+			r = items[0]
 
 			# assign variables
 			title = r['title']
-			link = 'https://vndb.org/v' + str(r['id'])
+			vn_id = str(r['id'])
+			if not vn_id.startswith('v'):
+				vn_id = f"v{vn_id}"
+			link = f'https://vndb.org/{vn_id}'
 
 			try:
 				desc = shorten(r['description'])
 			except:
 				desc = 'Empty Description'
 			# ----
-			try:
-				score = str(r['rating'])
-			except:
-				score = 'Unknown'
-			# ----
-			try:
-				votes = str(r['votecount'])
-			except:
-				votes = 'Unknown'
-			# ----
-			try:
-				popularity = str(r['popularity'])
-			except:
+			rating = r.get('rating')
+			score = f"{rating/10:.2f}" if isinstance(rating, (int, float)) else 'Unknown'
+			vote_count = r.get('votecount')
+			votes = str(vote_count) if vote_count is not None else 'Unknown'
+			popularity_val = r.get('popularity')
+			if isinstance(popularity_val, (int, float)):
+				popularity = f"{popularity_val:.2f}"
+			else:
 				popularity = 'Unknown'
-			# ----
-			try:
-				released = r['released']
-			except:
-				released = 'Unknown'
-			# ----
-			try:
-				length = {
-					1 : 'Very Short (< 2 hours)',
-					2 : 'Short (2 - 10 hours)',
-					3 : 'Medium (10 - 30 hours)',
-					4 : 'Long (30 - 50 hours)',
-					5 : 'Very Long (> 50 hours)'
-				}[r['length']]
-			except:
-				length = 'Unknown'
-			# ----
-			try:
-				image = r['image']
-			except:
-				image = 'https://i.kym-cdn.com/photos/images/original/000/290/992/0aa.jpg'
-			# ----
-			try:
-				screens = r['screens']
-			except:
-				screens = []
-			# ----
-			try:
-				langs = str(r['languages']).replace('[', '').replace(']', '').replace('\'','')
-			except:
-				langs = 'Unknown'
-			# ----
-			try:
-				platforms = str(r['platforms']).replace('[', '').replace(']', '').replace('\'','')
-			except:
-				platforms = 'Unknown'
-			# NSFW images disabled by default
-			nsfw = False
+			released = r.get('released') or 'Unknown'
+
+			length_map = {
+				1: 'Very Short (< 2 hours)',
+				2: 'Short (2 - 10 hours)',
+				3: 'Medium (10 - 30 hours)',
+				4: 'Long (30 - 50 hours)',
+				5: 'Very Long (> 50 hours)'
+			}
+			length = length_map.get(r.get('length'), 'Unknown')
+
+			image = (r.get('image') or {}).get('url') or 'https://i.kym-cdn.com/photos/images/original/000/290/992/0aa.jpg'
+
+			screens = r.get('screenshots') or []
+
+			langs = ', '.join(r.get('languages', [])) if r.get('languages') else 'Unknown'
+
+			platforms = ', '.join(r.get('platforms', [])) if r.get('platforms') else 'Unknown'
+
+			nsfw = any(s.get('nsfw') for s in screens)
 
 			# display info on discord
 			embed = discord.Embed(
@@ -448,10 +433,29 @@ class Weeb(commands.Cog, name="Weeb"):
 				screens.remove(f)
 
 			# Post image
-			if len(screens) >= 1:
-				embed.set_image(url=random.choice(screens)['image'])
+			if image:
+				embed.set_image(url=image)
+
+			extra = None
+			if interaction.guild:
+				extra = await embedVnScores(interaction.guild, vn_id, 9, embed)
 
 			await interaction.response.send_message(embed=embed)
+
+			if extra:
+				msg = await interaction.original_response()
+
+				def check(reaction, user):
+					return user != msg.author and str(reaction.emoji) == '➕'
+
+				await msg.add_reaction('➕')
+
+				try:
+					reaction, author = await self.bot.wait_for('reaction_add', timeout=10.0, check=check)
+				except asyncio.TimeoutError:
+					await msg.clear_reactions()
+				else:
+					await interaction.followup.send(content=f"({title})", embed=extra)
 		except Exception as e:
 			logger.exception('Exception looking up VN')
 			await interaction.response.send_message('VN not found (title usually has to be exact)')
@@ -459,7 +463,7 @@ class Weeb(commands.Cog, name="Weeb"):
 	@vn_group.command()
 	async def quote(self, interaction):
 		"""display a random visual novel quote"""
-		q = Vndb()
+		q = VndbSearch()
 		quote = await q.quote()
 
 		try:
@@ -605,6 +609,89 @@ def calculateMean(users, malId, anilistId, listType):
 	mean = round(mean, 2)
 
 	return mean
+
+async def embedVnScores(guild, vnId, maxDisplay, embed):
+	userIdsInGuild = [str(u.id) for u in guild.members]
+	if not userIdsInGuild:
+		return None
+
+	norm_id = vnId if vnId.startswith('v') else f"v{vnId}"
+	alt_id = norm_id[1:] if norm_id.startswith('v') else norm_id
+
+	users = [d async for d in Resources.user_col.find(
+		{
+			'discord_id': {'$in': userIdsInGuild},
+			'status': { '$not': { '$eq': UserStatus.INACTIVE } },
+			'service': 'vndb',
+			'$or': [
+				{f"lists.vn.{norm_id}": {'$exists': True}},
+				{f"lists.vn.{alt_id}": {'$exists': True}},
+			]
+		},
+		{
+			'profile.name': 1,
+			'lists.vn': 1
+		}
+	)]
+
+	if not users:
+		return None
+
+	avg = calculateVnMean(users, norm_id, alt_id)
+	if avg is not None:
+		embed.add_field(name="Score (local)", value=f"{avg}/100", inline=False)
+	elif users:
+		embed.add_field(name="Score (local)", value="No scores yet", inline=False)
+
+	usrLen = len(users)
+	for i in range(0, min(usrLen, maxDisplay-1)):
+		vnScoreEmbeder(users[i], norm_id, alt_id, embed)
+
+	if usrLen == maxDisplay:
+		vnScoreEmbeder(users[maxDisplay-1], norm_id, alt_id, embed)
+		return None
+	elif usrLen > maxDisplay:
+		embed.add_field(name='+'+str(usrLen-maxDisplay+1)+' others', value="...", inline=True)
+		extraEmbed = discord.Embed(color=discord.Color.blue())
+		for i in range(maxDisplay-1, usrLen):
+			vnScoreEmbeder(users[i], norm_id, alt_id, extraEmbed)
+		return extraEmbed
+	else:
+		return None
+
+def vnScoreEmbeder(user, norm_id, alt_id, embed):
+	entry = _get_vn_entry(user, norm_id, alt_id)
+	if not entry:
+		return
+	status = statusConversion(entry.get('status', Status.UNKNOWN), 'vn')
+	vote = entry.get('vote')
+	if not vote:
+		embed.add_field(name=user['profile']['name'], value=f"No Score ({status})", inline=True)
+	else:
+		embed.add_field(name=user['profile']['name'], value=f"{vote}/100 ({status})", inline=True)
+
+def calculateVnMean(users, norm_id, alt_id):
+	votes = []
+	for user in users:
+		entry = _get_vn_entry(user, norm_id, alt_id)
+		if not entry:
+			continue
+		vote = entry.get('vote')
+		if vote:
+			votes.append(vote)
+
+	if not votes:
+		return None
+
+	mean = round(statistics.fmean(votes), 2)
+	return mean
+
+def _get_vn_entry(user, norm_id, alt_id):
+	lists = user.get('lists', {}).get('vn', {})
+	entry = lists.get(norm_id)
+	if not entry:
+		entry = lists.get(alt_id)
+	return entry
 
 def limitLength(lst):
 	orgLen = len('\n'.join(lst))
