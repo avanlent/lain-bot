@@ -1,5 +1,6 @@
 from .anilist import Description as anilist
 from .myanimelist import Description as myanimelist
+from .vndb import Description as vndb
 
 from enum import Enum
 
@@ -31,26 +32,30 @@ def _meta_gen(desc) -> Meta:
 class Services(Enum):
     anilist = anilist.label
     myanimelist = myanimelist.label
+    vndb = vndb.label
 
 class Service:
     ANILIST = _meta_gen(anilist)
     MYANIMELIST = _meta_gen(myanimelist)
+    VNDB = _meta_gen(vndb)
 
     def __new__(cls, service: str):
         if service == Service.ANILIST:
             return Service.ANILIST
         elif service == Service.MYANIMELIST:
             return Service.MYANIMELIST
+        elif service == Service.VNDB:
+            return Service.VNDB
         else:
             raise AttributeError(f"No service with name {service}")
 
     @staticmethod
     def all():
-        return [Service.ANILIST, Service.MYANIMELIST]
+        return [Service.ANILIST, Service.MYANIMELIST, Service.VNDB]
 
     @staticmethod
     def active():
-        return [Service.ANILIST, Service.MYANIMELIST]
+        return [Service.ANILIST, Service.MYANIMELIST, Service.VNDB]
 
     @staticmethod
     async def register(bot):
@@ -63,5 +68,6 @@ class Service:
         for service in Service.active():
             Resources.removal_buffers[service] = set()
             Resources.status_buffers[service] = {}
+            Resources.sync_resume_buffers[service] = []
             syncer = Syncer(bot, service, service.Query(), service.time_between_queries)
             bot.loop.create_task(syncer.loop())

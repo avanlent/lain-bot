@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from io import BytesIO
     
 import asyncio, discord, datetime, logging, time
+from io import BytesIO
 
 from . import Service
 from .models.user import User, UserStatus
@@ -33,24 +34,34 @@ class Syncer:
                 Resources.removal_buffers[self.service] = set()
                 Resources.status_buffers[self.service] = {}
                 cursor = Resources.user_col.find({'status': { '$not': { '$eq': UserStatus.INACTIVE } }, 'service': self.service})
-                try:
-                    users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
-                except asyncio.CancelledError:
-                    raise
-                except:
-                    users = []
-                    logger.exception(f"initial batch fail for {self.service}")
+
+                resume_users = Resources.sync_resume_buffers.get(self.service, [])
+                if resume_users:
+                    users = resume_users
+                    Resources.sync_resume_buffers[self.service] = []
+                else:
+                    try:
+                        raw_users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
+                    except asyncio.CancelledError:
+                        raise
+                    except:
+                        raw_users = []
+                        logger.exception(f"initial batch fail for {self.service}")
+                    users = [User(**user) for user in raw_users]
 
                 while users:
-                    users = [User(**user) for user in users] # format document to User
                     names = [u.profile.name for u in users]
                     
                     # print(f"{self.service}::{names}")
                     fetch_start = time.time()
                     fetched_data = await self.query.fetch(users) # query new data for users
+                    deferred_users = getattr(self.query, 'deferred_users', [])
+                    deferred_ids = {u._id for u in deferred_users} if deferred_users else set()
 
                     # handle each user
                     for user in users:
+                        if deferred_ids and user._id in deferred_ids:
+                            continue
                         user_data = fetched_data.get(user._id)
 
                         if not user_data: # query didn't populate this user
@@ -89,17 +100,23 @@ class Syncer:
                             )
                 
                     users_end = time.time()
+                    sleep_corrected = max(0, self.sleep_time - (users_end-fetch_start))
+                    await asyncio.sleep(sleep_corrected)
+
+                    if deferred_users:
+                        Resources.sync_resume_buffers[self.service] = deferred_users
+                        users = []
+                        continue
+
                     # ready new batch from db
                     try:
-                        users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
+                        raw_users = await cursor.to_list(length=self.query.MAX_USERS_PER_QUERY)
                     except asyncio.CancelledError:
                         raise
                     except:
                         logger.exception(f'new batch fail for {self.service}')
-                        users = []
-                    finally:
-                        sleep_corrected = max(0, self.sleep_time - (users_end-fetch_start))
-                        await asyncio.sleep(sleep_corrected)
+                        raw_users = []
+                    users = [User(**user) for user in raw_users]
             
                 # done with all the batches, start new round of batches
                 await cursor.close()
@@ -230,23 +247,49 @@ class Syncer:
         for lst in msgs:
             embed.add_field(name=f"Updated their {lst} list", value=self._limit_msgs(msgs[lst]), inline=False)
 
-        if len(imgs) == 1:
-            embed.set_image(url=imgs[0].wide)
-            return await channel.send(embed=embed)
-        elif len(imgs) > 1:
-            imgs = tuple([i.narrow for i in imgs][:6])
-            fn = f"{hash(imgs)}.jpg"
+        attachments: List[discord.File] = []
+        spoiler_lines: List[str] = []
+
+        safe_imgs = [img for img in imgs if not img.nsfw]
+        nsfw_imgs = [img for img in imgs if img.nsfw]
+
+        if len(safe_imgs) == 1:
+            embed.set_image(url=safe_imgs[0].wide)
+        elif len(safe_imgs) > 1:
+            combine_key = tuple(image.narrow for image in safe_imgs[:6])
+            fn = f"{hash(combine_key)}.jpg"
             fp = img_stash.get(fn)
             if not fp:
-                fp = await Resources.img_gen.combineUrl(Resources.syncer_session, self.bot.loop, imgs)
+                fp = await Resources.img_gen.combineUrl(Resources.syncer_session, self.bot.loop, combine_key)
                 img_stash[fn] = fp
             else:
                 fp.seek(0)
+            fp.seek(0)
+            attachments.append(discord.File(fp, filename=fn))
             embed.set_image(url=f"attachment://{fn}")
-            f = discord.File(fp, filename=fn)
-            return await channel.send(file=f, embed=embed)
-        else:
-            return await channel.send(embed=embed)
+
+        if not safe_imgs and nsfw_imgs:
+            embed.set_image(url=nsfw_imgs[0].wide)
+
+        for image in nsfw_imgs[:6]:
+            spoiler_lines.append(f"|| {image.wide} ||")
+
+        spoiler_content = "\n".join(spoiler_lines) if spoiler_lines else None
+
+        if spoiler_content:
+            msg = await channel.send(content=spoiler_content)
+            edit_kwargs = {"content": spoiler_content, "embed": embed}
+            if attachments:
+                edit_kwargs["files"] = attachments
+            return await msg.edit(**edit_kwargs)
+
+        send_kwargs = {"embed": embed}
+        if attachments:
+            if len(attachments) == 1:
+                send_kwargs["file"] = attachments[0]
+            else:
+                send_kwargs["files"] = attachments
+        return await channel.send(**send_kwargs)
 
     def _limit_msgs(self, msgs, limit=6):
         num_changes = len(msgs)
@@ -277,3 +320,4 @@ class Syncer:
 
         change_msgs = f"{change_msgs}{extra.format(cnt=cnt)}"
         return change_msgs
+
