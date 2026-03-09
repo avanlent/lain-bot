@@ -11,41 +11,75 @@ from ..models.data import Image
 from ..models.change import Change
 from .enums import Status, ScoreFormat, ChangeKind
 
+def _format_anime_title(self: AnimeEntry) -> str:
+    title = self['title'] or 'Unknown Anime'
+    link = self['link']
+    if link:
+        return f"[{title}]({link})"
+    return title
+
+def _format_manga_title(self: MangaEntry) -> str:
+    title = self['title'] or 'Unknown Manga'
+    link = self['link']
+    if link:
+        return f"[{title}]({link})"
+    return title
+
 def status_consumer(self: AnimeEntry, old: str, new: str) -> Optional[Change]:
     if old == new:
         return None
-    msg = f"{self['title']} added to {new} list"
+    title = _format_anime_title(self)
+    msg = f"{title} added to {new} list"
     if new in [Status.COMPLETED, Status.DROPPED, Status.PAUSED]:
-        msg = f"{new} {self['title']}"
+        msg = f"{new} {title}"
     return Change(ChangeKind.STATUS, old, new, msg)
 
 def score_consumer(self: AnimeEntry, old: Union[float, int], new: Union[float, int]) -> Optional[Change]:
     if old == new:
         return None
-    return Change(ChangeKind.SCORE, old, new, f"score of {self['title']} changed: {old} ➔ {new}")
+    msg = f"score of {_format_anime_title(self)} changed: {old} ➔ {new}"
+    return Change(ChangeKind.SCORE, old, new, msg)
+
+def status_consumer_manga(self: MangaEntry, old: str, new: str) -> Optional[Change]:
+    if old == new:
+        return None
+    title = _format_manga_title(self)
+    msg = f"{title} added to {new} list"
+    if new in [Status.COMPLETED, Status.DROPPED, Status.PAUSED]:
+        msg = f"{new} {title}"
+    return Change(ChangeKind.STATUS, old, new, msg)
+
+def score_consumer_manga(self: MangaEntry, old: Union[float, int], new: Union[float, int]) -> Optional[Change]:
+    if old == new:
+        return None
+    msg = f"score of {_format_manga_title(self)} changed: {old} ➔ {new}"
+    return Change(ChangeKind.SCORE, old, new, msg)
 
 def episode_consumer(self: AnimeEntry, old: int, new: int) -> Optional[Change]:
     if old >= new:
         return None
-    msg = f"watched episode {new} of {self['title']}"
+    title = _format_anime_title(self)
+    msg = f"watched episode {new} of {title}"
     if new - old > 1:
-        msg = f"watched episodes {old+1}-{new} of {self['title']}"
+        msg = f"watched episodes {old+1}-{new} of {title}"
     return Change(ChangeKind.PROGRESS, old, new, msg)
 
-def chapter_consumer(self: AnimeEntry, old: int, new: int) -> Optional[Change]:
+def chapter_consumer(self: MangaEntry, old: int, new: int) -> Optional[Change]:
     if old >= new:
         return None
-    msg = f"read chapter {new} of {self['title']}"
+    title = _format_manga_title(self)
+    msg = f"read chapter {new} of {title}"
     if new - old > 1:
-        msg = f"read chapters {old+1}-{new} of {self['title']}"
+        msg = f"read chapters {old+1}-{new} of {title}"
     return Change(ChangeKind.PROGRESS, old, new, msg)
 
-def volume_consumer(self: AnimeEntry, old: int, new: int) -> Optional[Change]:
+def volume_consumer(self: MangaEntry, old: int, new: int) -> Optional[Change]:
     if old >= new:
         return None
-    msg = f"read volume {new} of {self['title']}"
+    title = _format_manga_title(self)
+    msg = f"read volume {new} of {title}"
     if new - old > 1:
-        msg = f"read volumes {old+1}-{new} of {self['title']}"
+        msg = f"read volumes {old+1}-{new} of {title}"
     return Change(ChangeKind.PROGRESS, old, new, msg)
 
 def rationalizer(self, user: User, latest_profile: WeebProfile = None) -> None:
@@ -102,10 +136,11 @@ def rationalizer(self, user: User, latest_profile: WeebProfile = None) -> None:
     if score_change:
         old = old_score_format.formatted_score(score_change.old)
         new = new_score_format.formatted_score(score_change.new)
+        title = f"[{self['title']}]({self['link']})" if self['link'] else (self['title'] or 'Unknown')
         if score_change.old == 0:
-            score_change.msg = f"score of {self['title']} set to {new}"
+            score_change.msg = f"score of {title} set to {new}"
         else:
-            score_change.msg = f"score of {self['title']} changed: {old} ➔ {new}"
+            score_change.msg = f"score of {title} changed: {old} ➔ {new}"
 
 def img(self) -> List[Image]:
     if self['banner'] and self['cover']:
@@ -124,6 +159,7 @@ class AnimeEntry(ListEntry):
             field('attributes', 0, concealed=True),
             field('banner', '', concealed=True),
             field('cover', '', concealed=True),
+            field('link', '', concealed=True),
             field('title', ''),
             field('episodes', 0)
         ],
@@ -153,15 +189,16 @@ class MangaEntry(ListEntry):
             field('attributes', 0, concealed=True),
             field('banner', '', concealed=True),
             field('cover', '', concealed=True),
+            field('link', '', concealed=True),
             field('title', ''),
             field('chapters', 0),
             field('volumes', 0)
         ],
         DYNAMIC_FIELDS=[
-            field('score', 0, score_consumer),
+            field('score', 0, score_consumer_manga),
             field('chapter_progress', 0, chapter_consumer),
             field('volume_progress', 0, volume_consumer),
-            field('status', Status.UNKNOWN, status_consumer)
+            field('status', Status.UNKNOWN, status_consumer_manga)
         ]
     )
 
@@ -179,3 +216,5 @@ class MangaEntry(ListEntry):
     rationalize_changes = rationalizer
 
     images = img
+
+
