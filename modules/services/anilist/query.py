@@ -365,8 +365,8 @@ class AnilistQuery(Query):
                     continue
                 for entry in sublst['entries']:
                     media = AnimeEntry()
-                    media._source = 'anilist'
                     media['id'] = entry.get('mediaId')
+                    media['link'] = f"https://anilist.co/anime/{entry.get('mediaId')}" if entry.get('mediaId') else ''
                     media['banner'] = entry['media']['bannerImage']
                     media['cover'] = entry['media']['coverImage']['large']
                     media['title'] = entry['media']['title']['romaji']
@@ -402,8 +402,8 @@ class AnilistQuery(Query):
                     continue
                 for entry in sublst['entries']:
                     media = MangaEntry()
-                    media._source = 'anilist'
                     media['id'] = entry.get('mediaId')
+                    media['link'] = f"https://anilist.co/manga/{entry.get('mediaId')}" if entry.get('mediaId') else ''
                     media['banner'] = entry['media']['bannerImage']
                     media['cover'] = entry['media']['coverImage']['large']
                     media['title'] = entry['media']['title']['romaji']

@@ -184,6 +184,7 @@ class MyAnimeListQuery(Query):
                 media = AnimeEntry()
                 media.images = types.MethodType(img_a, media)
                 media['id'] = entry.get('anime_id')
+                media['link'] = f"https://myanimelist.net/anime/{entry.get('anime_id')}" if entry.get('anime_id') else ''
                 media['cover'] = entry.get('anime_image_path')
                 media['title'] = entry.get('anime_title')
                 media['episodes'] = entry.get('anime_num_episodes')
@@ -218,6 +219,7 @@ class MyAnimeListQuery(Query):
                 media = MangaEntry()
                 media.images = types.MethodType(img_m, media)
                 media['id'] = entry.get('manga_id')
+                media['link'] = f"https://myanimelist.net/manga/{entry.get('manga_id')}" if entry.get('manga_id') else ''
                 media['cover'] = entry.get('manga_image_path')
                 media['title'] = entry.get('manga_title')
                 media['chapters'] = entry.get('manga_num_chapters')

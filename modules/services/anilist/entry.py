@@ -13,14 +13,14 @@ from .enums import Status, ScoreFormat, ChangeKind
 
 def _format_anime_title(self: AnimeEntry) -> str:
     title = self['title'] or 'Unknown Anime'
-    link = self._link()
+    link = self['link']
     if link:
         return f"[{title}]({link})"
     return title
 
 def _format_manga_title(self: MangaEntry) -> str:
     title = self['title'] or 'Unknown Manga'
-    link = self._link()
+    link = self['link']
     if link:
         return f"[{title}]({link})"
     return title
@@ -136,7 +136,7 @@ def rationalizer(self, user: User, latest_profile: WeebProfile = None) -> None:
     if score_change:
         old = old_score_format.formatted_score(score_change.old)
         new = new_score_format.formatted_score(score_change.new)
-        title = f"[{self['title']}]({self._link()})" if self._link() else (self['title'] or 'Unknown')
+        title = f"[{self['title']}]({self['link']})" if self['link'] else (self['title'] or 'Unknown')
         if score_change.old == 0:
             score_change.msg = f"score of {title} set to {new}"
         else:
@@ -159,6 +159,7 @@ class AnimeEntry(ListEntry):
             field('attributes', 0, concealed=True),
             field('banner', '', concealed=True),
             field('cover', '', concealed=True),
+            field('link', '', concealed=True),
             field('title', ''),
             field('episodes', 0)
         ],
@@ -181,14 +182,6 @@ class AnimeEntry(ListEntry):
 
     images = img
 
-    def _link(self) -> Optional[str]:
-        if getattr(self, '_source', None) != 'anilist':
-            return None
-        aid = self['id'] if self['id'] else None
-        if not aid:
-            return None
-        return f"https://anilist.co/anime/{aid}"
-
 class MangaEntry(ListEntry):
     specs = Specs(
         DATA_FIELDS=[
@@ -196,6 +189,7 @@ class MangaEntry(ListEntry):
             field('attributes', 0, concealed=True),
             field('banner', '', concealed=True),
             field('cover', '', concealed=True),
+            field('link', '', concealed=True),
             field('title', ''),
             field('chapters', 0),
             field('volumes', 0)
@@ -222,13 +216,5 @@ class MangaEntry(ListEntry):
     rationalize_changes = rationalizer
 
     images = img
-
-    def _link(self) -> Optional[str]:
-        if getattr(self, '_source', None) != 'anilist':
-            return None
-        mid = self['id'] if self['id'] else None
-        if not mid:
-            return None
-        return f"https://anilist.co/manga/{mid}"
 
 
