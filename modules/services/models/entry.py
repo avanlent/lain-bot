@@ -64,12 +64,13 @@ class ListEntry:
     """Represents an entry in list during sync process. Fields are accessed like 
     a dict, ex: my_entry[field].
     """
-    __slots__ = ['fields', '_changes']
+    __slots__ = ['fields', '_changes', '_source']
     specs = Specs()
 
     def __init__(self) -> None:
         self._changes = []
         self.fields = {}
+        self._source = None  # 'anilist' | None; used so _link() only returns URLs for AniList (MAL reuses these entry classes)
 
     ### dict access functionality. don't override ###
     #|  e.get(key, default) functionality

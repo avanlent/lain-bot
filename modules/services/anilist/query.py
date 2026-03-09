@@ -365,6 +365,7 @@ class AnilistQuery(Query):
                     continue
                 for entry in sublst['entries']:
                     media = AnimeEntry()
+                    media._source = 'anilist'
                     media['id'] = entry.get('mediaId')
                     media['banner'] = entry['media']['bannerImage']
                     media['cover'] = entry['media']['coverImage']['large']
@@ -401,6 +402,7 @@ class AnilistQuery(Query):
                     continue
                 for entry in sublst['entries']:
                     media = MangaEntry()
+                    media._source = 'anilist'
                     media['id'] = entry.get('mediaId')
                     media['banner'] = entry['media']['bannerImage']
                     media['cover'] = entry['media']['coverImage']['large']
